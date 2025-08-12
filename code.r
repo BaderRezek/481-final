@@ -205,3 +205,128 @@ plot(
 library(car)
 vif(main_model)
 # VIF > 10 → Possible multicollinearity in S1, S2, S3, S5
+
+##################################################
+#       VARIABLE SELECTION METHODS
+##################################################
+
+## Backward Selection (AIC)
+full_model <- lm(Target ~ ., data = data)
+backward_model <- step(full_model, direction = "backward", trace = TRUE)
+summary(backward_model)
+
+## Backward Selection (P-value)
+pval_backward_model <- lm(Target ~ ., data = data)
+
+repeat {
+    model_summary <- summary(pval_backward_model)
+    pvals <- coef(model_summary)[, "Pr(>|t|)"][-1]  # Exclude intercept
+    max_pval <- max(pvals, na.rm = TRUE)
+
+    if (max_pval > 0.10) {
+        var_to_remove <- names(which.max(pvals))
+        current_vars <- all.vars(formula(pval_backward_model))[-1]
+        updated_vars <- setdiff(current_vars, var_to_remove)
+        updated_formula <- as.formula(paste("Target ~", paste(updated_vars, collapse = " + ")))
+        pval_backward_model <- lm(updated_formula, data = data)
+    } else {
+        break
+    }
+}
+summary(pval_backward_model)
+
+
+## Forward Selection (AIC)
+null_model <- lm(Target ~ 1, data = data)
+forward_model <- step(
+    null_model,
+    scope = list(lower = null_model, upper = full_model),
+    direction = "forward",
+    trace = TRUE
+)
+summary(forward_model)
+
+
+## Forward Selection (P-value)
+null_model <- lm(Target ~ 1, data = data)
+scope <- setdiff(names(data), "Target")
+selected <- c()
+
+repeat {
+    pvals <- c()
+    for (var in setdiff(scope, selected)) {
+        temp_formula <- as.formula(paste("Target ~", paste(c(selected, var), collapse = " + ")))
+        temp_model <- lm(temp_formula, data = data)
+        p <- summary(temp_model)$coefficients[var, "Pr(>|t|)"]
+        pvals[var] <- p
+    }
+    if (length(pvals) == 0 || min(pvals, na.rm = TRUE) > 0.10) break
+    selected <- c(selected, names(which.min(pvals)))
+}
+
+final_formula <- as.formula(paste("Target ~", paste(selected, collapse = " + ")))
+pval_forward_model <- lm(final_formula, data = data)
+summary(pval_forward_model)
+
+
+## Stepwise Selection
+stepwise_model <- step(full_model, direction = "both", trace = TRUE)
+summary(stepwise_model)
+
+
+##################################################
+#       MODEL COMPARISON (AIC)
+##################################################
+
+AIC(full_model, backward_model, forward_model, stepwise_model)
+# Lower AIC → better model
+
+
+##################################################
+#       FINAL MODEL & ASSUMPTION CHECKS
+##################################################
+
+final_model <- lm(Target ~ SEX + BMI + BP + S1 + S2 + S5, data = data)
+summary(final_model)$coefficients
+
+# 1. Linearity
+par(mfrow = c(2, 3))
+for (var in c("SEX", "BMI", "BP", "S1", "S2", "S5")) {
+    plot(
+        data[[var]], residuals(final_model),
+        main = paste("Residuals vs", var),
+        xlab = var, ylab = "Residuals",
+        pch = 19, col = "#99EDB8FF"
+    )
+    abline(h = 0, col = "lightpink", lty = 2)
+}
+par(mfrow = c(1, 1))
+
+# 2. Independence
+plot(
+    residuals(final_model)[-length(residuals(final_model))],
+    residuals(final_model)[-1],
+    main = "Residuals vs Lagged Residuals",
+    xlab = expression(e[i-1]), ylab = expression(e[i]),
+    pch = 19, col = "#99EDB8FF"
+)
+abline(h = 0, v = 0, col = "lightpink", lty = 2)
+
+# 3. Normality
+qqnorm(
+    residuals(final_model),
+    main = "Q-Q Plot of Residuals",
+    col = "#99EDB8FF", pch = 19
+)
+qqline(residuals(final_model), col = "lightpink", lwd = 2)
+shapiro.test(residuals(final_model))
+
+# 4. Homoscedasticity
+plot(
+    final_model$fitted.values, residuals(final_model),
+    main = "Residuals vs Fitted Values",
+    xlab = "Fitted Values", ylab = "Residuals",
+    pch = 19, col = "#99EDB8FF"
+)
+abline(h = 0, col = "lightpink", lwd = 2)
+title(sub = "Checking for constant variance")
